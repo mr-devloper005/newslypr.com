@@ -3,9 +3,9 @@ import type { CSSProperties } from 'react'
 import { ArrowRight, Bookmark, BriefcaseBusiness, Building2, Camera, Download, FileText, Filter, Image as ImageIcon, MapPin, Megaphone, Search, Newspaper, UserRound } from 'lucide-react'
 import { buildTaskMetadata } from '@/lib/seo'
 import { CATEGORY_OPTIONS, normalizeCategory } from '@/lib/categories'
-import { fetchPaginatedTaskPosts, buildPostUrl } from '@/lib/task-data'
+import { fetchPaginatedTaskPosts, buildPostUrl, getPostTaskKey } from '@/lib/task-data'
 import { getTaskConfig, SITE_CONFIG, type TaskKey } from '@/lib/site-config'
-import type { SiteFeedPagination, SitePost } from '@/lib/site-connector'
+import { fetchSiteFeed, type SiteFeedPagination, type SitePost } from '@/lib/site-connector'
 import { taskPageMetadata } from '@/config/site.content'
 import { taskPageVoices } from '@/editable/content/task-pages.content'
 import { EditableSiteShell } from '@/editable/shell/EditableSiteShell'
@@ -46,6 +46,32 @@ const getField = (post: SitePost, keys: string[]) => {
   return ''
 }
 
+const postStatus = (post: SitePost) => {
+  const status = (post as unknown as { status?: unknown }).status
+  return typeof status === 'string' ? status.toUpperCase() : ''
+}
+
+const mediaDistributionType = (post: SitePost) => {
+  const content = getContent(post)
+  const explicit = asText(content.type).toLowerCase().replace(/[\s_-]/g, '')
+  const tags = Array.isArray(post.tags) ? post.tags.map((tag) => String(tag).toLowerCase().replace(/[\s_-]/g, '')) : []
+  return explicit || tags.find((tag) => ['mediadistribution', 'pressrelease', 'newsmedia', 'publicrelation'].includes(tag)) || ''
+}
+
+const isRealMediaDistributionPost = (post: SitePost) => {
+  if (postStatus(post) && postStatus(post) !== 'PUBLISHED') return false
+  if (getPostTaskKey(post) === 'mediaDistribution') return true
+  const type = mediaDistributionType(post)
+  return ['mediadistribution', 'pressrelease', 'newsmedia', 'publicrelation'].includes(type)
+}
+
+const uniquePosts = (posts: SitePost[]) => Array.from(new Map(posts.map((post) => [post.id || post.slug || post.title, post])).values())
+
+const localPagination = (page: number, limit: number, total: number): SiteFeedPagination => {
+  const totalPages = Math.max(1, Math.ceil(total / limit))
+  return { page, limit, total, totalPages, hasPrevPage: page > 1, hasNextPage: page < totalPages }
+}
+
 function pageHref(basePath: string, category: string, page: number) {
   const params = new URLSearchParams()
   if (category && category !== 'all') params.set('category', category)
@@ -78,7 +104,24 @@ export async function EditableTaskArchiveRoute({
   const page = Math.max(1, Math.floor(Number(resolved.page) || 1))
   const category = resolved.category ? normalizeCategory(resolved.category) : 'all'
   const taskConfig = getTaskConfig(task)
-  const { posts, pagination } = await fetchPaginatedTaskPosts(task, { page, limit: 24, category })
+  const limit = 24
+  const scoped = await fetchPaginatedTaskPosts(task, { page, limit, category, fresh: true })
+  let posts = scoped.posts
+  let pagination = scoped.pagination
+
+  // Some media-distribution route aliases are backed by feeds that ignore the task query.
+  // Keep the archive on real API data by retrying against the unscoped feed before rendering empty.
+  if (task === 'mediaDistribution' && !posts.length) {
+    const feed = await fetchSiteFeed(1000, { fresh: true, category: category === 'all' ? undefined : category, timeoutMs: 5000 })
+    const matching = uniquePosts((feed?.posts || []).filter((post) => {
+      if (!isRealMediaDistributionPost(post)) return false
+      if (category === 'all') return true
+      return normalizeCategory(getCategory(post, '')) === category
+    }))
+    posts = matching.slice((page - 1) * limit, page * limit)
+    pagination = localPagination(page, limit, matching.length)
+  }
+
   return <TaskArchiveView task={task} posts={posts} pagination={pagination} category={category} basePath={basePath || taskConfig?.route || `/${task}`} />
 }
 
@@ -184,30 +227,30 @@ function EditorialArchive({
   const page = pagination.page || 1
   const lead = posts[0]
   const secondary = posts.slice(1, 3)
-  const remaining = posts.slice(3)
+  const remaining = posts
 
   return (
     <EditableSiteShell>
-      <main className="min-h-screen bg-[#f7f4ef] text-[#111]">
+      <main className="editable-page-enter min-h-screen bg-white text-[#111]">
         <section className="border-b border-black bg-white">
           <div className="mx-auto flex max-w-[var(--editable-container)] flex-col gap-6 px-4 py-10 sm:px-6 lg:flex-row lg:items-end lg:justify-between lg:px-8 lg:py-14">
             <div>
-              <p className="text-xs font-black uppercase tracking-[0.28em] text-[#c92f2f]">The newsroom</p>
-              <h1 className="editorial-brand mt-3 text-6xl font-black leading-none tracking-[-0.055em] sm:text-7xl lg:text-8xl">
+              <p className="text-xs font-black uppercase tracking-[0.28em] text-black/50">The distribution desk</p>
+              <h1 className="mt-3 text-6xl font-black uppercase leading-none tracking-[-0.04em] sm:text-7xl lg:text-8xl">
                 {category === 'all' ? label : categoryLabel}
               </h1>
             </div>
-            <p className="max-w-md border-l-4 border-[#c92f2f] pl-5 text-sm font-bold leading-7 text-black/65">
-              Timely reporting, sharp perspectives, and media-ready stories organized for fast discovery.
+            <p className="max-w-md border-l-8 border-[var(--slot4-accent)] pl-5 text-sm font-bold leading-7 text-black/65">
+              Real media distribution posts, public updates, and announcement cards organized for fast discovery.
             </p>
           </div>
         </section>
 
         <section className="border-b border-black bg-[#171717] text-white">
           <div className="mx-auto flex max-w-[var(--editable-container)] gap-7 overflow-x-auto px-4 py-4 text-xs font-black uppercase tracking-[0.16em] sm:px-6 lg:px-8">
-            <Link href={basePath} className={category === 'all' ? 'text-[#f34a43]' : 'hover:text-[#f34a43]'}>Latest</Link>
+            <Link href={basePath} className={category === 'all' ? 'text-[var(--slot4-accent)]' : 'hover:text-[var(--slot4-accent)]'}>Latest</Link>
             {categories.slice(0, 8).map((item) => (
-              <Link key={item.slug} href={pageHref(basePath, item.slug, 1)} className={category === item.slug ? 'text-[#f34a43]' : 'whitespace-nowrap hover:text-[#f34a43]'}>
+              <Link key={item.slug} href={pageHref(basePath, item.slug, 1)} className={category === item.slug ? 'text-[var(--slot4-accent)]' : 'whitespace-nowrap hover:text-[var(--slot4-accent)]'}>
                 {item.name}
               </Link>
             ))}
@@ -216,26 +259,26 @@ function EditorialArchive({
 
         {lead ? (
           <section className="mx-auto grid max-w-[var(--editable-container)] border-x border-black bg-white lg:grid-cols-[1.75fr_0.75fr]">
-            <Link href={`${basePath}/${lead.slug}`} className="group relative min-h-[34rem] overflow-hidden border-b border-black lg:border-b-0 lg:border-r">
+            <Link href={`${basePath}/${lead.slug}`} className="editable-image-zoom group relative min-h-[34rem] overflow-hidden border-b border-black lg:border-b-0 lg:border-r">
               <img src={getImage(lead)} alt="" className="absolute inset-0 h-full w-full object-cover transition duration-700 group-hover:scale-[1.025]" />
               <div className="absolute inset-0 bg-gradient-to-t from-black via-black/15 to-transparent" />
               <div className="absolute inset-x-0 bottom-0 p-6 text-white sm:p-9">
-                <span className="bg-[#c92f2f] px-3 py-2 text-[10px] font-black uppercase tracking-[0.2em]">{getCategory(lead, label)}</span>
-                <h2 className="editorial-serif mt-5 max-w-4xl text-4xl font-black leading-[0.98] tracking-[-0.045em] sm:text-6xl">{lead.title}</h2>
-                <p className="mt-5 max-w-2xl line-clamp-2 text-sm font-semibold leading-7 text-white/80">{getSummary(lead)}</p>
+                <span className="bg-[var(--slot4-accent)] px-3 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-black">{getCategory(lead, label)}</span>
+                <h2 className="mt-5 max-w-4xl text-4xl font-black uppercase leading-[0.98] tracking-[-0.045em] sm:text-6xl">{lead.title}</h2>
+                
               </div>
             </Link>
             <div className="grid">
-              <div className="border-b border-black bg-[#c92f2f] p-6 text-white">
+              <div className="border-b border-black bg-[var(--slot4-accent)] p-6 text-black">
                 <p className="text-xs font-black uppercase tracking-[0.24em]">Top stories</p>
-                <p className="editorial-serif mt-3 text-3xl font-black leading-tight">What the newsroom is watching now.</p>
+                <p className="mt-3 text-3xl font-black uppercase leading-tight">What the distribution desk is watching now.</p>
               </div>
               {secondary.map((post, index) => (
                 <Link key={post.id || post.slug} href={`${basePath}/${post.slug}`} className="group grid grid-cols-[7rem_1fr] border-b border-black bg-white last:border-b-0">
                   <img src={getImage(post)} alt="" className="h-full min-h-40 w-full object-cover grayscale transition group-hover:grayscale-0" />
                   <div className="p-5">
-                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#c92f2f]">0{index + 1}</p>
-                    <h3 className="editorial-serif mt-3 text-xl font-black leading-tight">{post.title}</h3>
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-black/45">0{index + 1}</p>
+                    <h3 className="mt-3 text-xl font-black uppercase leading-tight">{post.title}</h3>
                   </div>
                 </Link>
               ))}
@@ -243,9 +286,9 @@ function EditorialArchive({
           </section>
         ) : null}
 
-        <section className="mx-auto max-w-[var(--editable-container)] border-x border-black bg-[#f7f4ef] px-4 py-12 sm:px-6 lg:px-8 lg:py-16">
+        <section className="mx-auto max-w-[var(--editable-container)] border-x border-black bg-[#f7f7f2] px-4 py-12 sm:px-6 lg:px-8 lg:py-16">
           <div className="mb-8 flex flex-wrap items-end justify-between gap-5 border-b-4 border-black pb-4">
-            <h2 className="editorial-brand text-4xl font-black tracking-[-0.04em] sm:text-5xl">More from the desk</h2>
+            <h2 className="text-4xl font-black uppercase tracking-[-0.04em] sm:text-5xl">Post cards</h2>
             <form action={basePath} className="flex border border-black bg-white">
               <select name="category" defaultValue={category} className="h-11 min-w-44 bg-transparent px-3 text-xs font-black uppercase outline-none">
                 <option value="all">All categories</option>
@@ -256,18 +299,18 @@ function EditorialArchive({
           </div>
 
           {remaining.length ? (
-            <div className="grid border-l border-t border-black md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid border-l border-t border-black md:grid-cols-2 xl:grid-cols-3 editable-stagger">
               {remaining.map((post, index) => (
-                <Link key={post.id || post.slug} href={`${basePath}/${post.slug}`} className="group border-b border-r border-black bg-white">
-                  <div className="aspect-[16/10] overflow-hidden bg-black">
+                <Link key={post.id || post.slug} href={`${basePath}/${post.slug}`} className="editable-card-hover group border-b border-r border-black bg-white">
+                  <div className="editable-image-zoom aspect-[16/10] overflow-hidden bg-black">
                     <img src={getImage(post)} alt="" className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
                   </div>
-                  <div className="p-5">
-                    <div className="flex items-center justify-between gap-4 text-[10px] font-black uppercase tracking-[0.18em] text-[#c92f2f]">
-                      <span>{getCategory(post, label)}</span><span>{String(index + 3).padStart(2, '0')}</span>
+                  <div className="p-5 sm:p-6">
+                    <div className="flex items-center justify-between gap-4 text-[10px] font-black uppercase tracking-[0.18em] text-black/50">
+                      <span>{getCategory(post, label)}</span><span>{String(index + 1).padStart(2, '0')}</span>
                     </div>
-                    <h3 className="editorial-serif mt-4 text-2xl font-black leading-[1.05]">{post.title}</h3>
-                    <p className="mt-4 line-clamp-3 text-sm leading-6 text-black/60">{getSummary(post)}</p>
+                    <h3 className="mt-4 text-2xl font-black uppercase leading-[1.05]">{post.title}</h3>
+                   
                   </div>
                 </Link>
               ))}
@@ -275,14 +318,14 @@ function EditorialArchive({
           ) : !lead ? (
             <div className="border border-dashed border-black bg-white p-12 text-center">
               <Search className="mx-auto h-8 w-8" />
-              <h2 className="editorial-serif mt-4 text-3xl font-black">No stories found</h2>
-              <p className="mt-2 text-sm text-black/60">Try another category or publish a new newsroom story.</p>
+              <h2 className="mt-4 text-3xl font-black uppercase">No real posts found</h2>
+              <p className="mt-2 text-sm text-black/60">Try another category or publish a new media distribution post.</p>
             </div>
           ) : null}
 
           <div className="mt-10 flex items-center justify-center gap-0">
             {pagination.hasPrevPage ? <Link href={pageHref(basePath, category, page - 1)} className="border border-black bg-white px-5 py-3 text-xs font-black uppercase">Previous</Link> : null}
-            <span className="border-y border-black bg-[#c92f2f] px-5 py-3 text-xs font-black uppercase text-white">Page {page} / {pagination.totalPages || 1}</span>
+            <span className="border-y border-black bg-[var(--slot4-accent)] px-5 py-3 text-xs font-black uppercase text-black">Page {page} / {pagination.totalPages || 1}</span>
             {pagination.hasNextPage ? <Link href={pageHref(basePath, category, page + 1)} className="border border-black bg-white px-5 py-3 text-xs font-black uppercase">Next</Link> : null}
           </div>
         </section>
