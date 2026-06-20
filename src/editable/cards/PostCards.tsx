@@ -55,15 +55,14 @@ export function EditorialFeatureCard({ post, href, label = 'Cover story' }: { po
 
 export function RailPostCard({ post, href, index }: { post: SitePost; href: string; index: number }) {
   return (
-    <Link href={href} className={`group ${dc.layout.minRailCard} block border-t-4 border-black bg-[var(--slot4-surface-bg)] ${dc.motion.lift}`}>
-      <div className="relative aspect-[4/3] overflow-hidden bg-[var(--slot4-media-bg)]">
-        <img src={getEditablePostImage(post)} alt={post.title} className="absolute inset-0 h-full w-full object-cover transition duration-500 group-hover:scale-105" />
-      </div>
-      <div className="p-4">
-        <div className="flex items-center justify-between gap-3 text-[10px] font-black uppercase tracking-[.18em] text-[var(--slot4-accent)]">
+    <Link href={href} className="group block min-h-[280px] border border-white/10 bg-[#202020] p-5 text-white transition duration-300 hover:-translate-y-1 hover:bg-[var(--slot4-accent)] hover:text-black">
+      <div className="flex h-full flex-col">
+        <div className="flex items-center justify-between gap-3 text-[10px] font-black uppercase tracking-[.18em] opacity-65">
           <span>{getEditableCategory(post)}</span><span>{String(index + 1).padStart(2, '0')}</span>
         </div>
-        <h3 className="mt-3 line-clamp-3 text-xl font-black leading-[1.02] tracking-[-.04em]">{post.title}</h3>
+        <h3 className="mt-8 line-clamp-4 text-3xl font-black leading-[.96] tracking-[-.04em]">{post.title}</h3>
+        <p className="mt-4 line-clamp-4 text-sm font-semibold leading-6 opacity-70">{getEditableExcerpt(post, 150)}</p>
+        <span className="mt-auto inline-flex items-center gap-2 pt-7 text-xs font-black uppercase tracking-[.16em]">View update <ArrowRight className="h-4 w-4" /></span>
       </div>
     </Link>
   )
@@ -71,11 +70,12 @@ export function RailPostCard({ post, href, index }: { post: SitePost; href: stri
 
 export function CompactIndexCard({ post, href, index }: { post: SitePost; href: string; index: number }) {
   return (
-    <Link href={href} className="group grid min-w-0 grid-cols-[46px_1fr] gap-4 border-t border-black/20 py-5 first:border-t-0">
+    <Link href={href} className="group grid min-w-0 grid-cols-[46px_1fr] gap-4 bg-white p-5 transition hover:bg-[var(--slot4-accent)]">
       <span className="text-3xl font-black leading-none text-[var(--slot4-accent)]">{String(index + 1).padStart(2, '0')}</span>
       <div className="min-w-0">
         <p className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[.18em] text-black/50"><Clock3 className="h-3 w-3" /> {getEditableCategory(post)}</p>
         <h3 className="mt-2 line-clamp-3 text-lg font-black leading-tight tracking-[-.03em] group-hover:text-[var(--slot4-accent)]">{post.title}</h3>
+        <p className="mt-2 line-clamp-2 text-xs font-semibold leading-5 opacity-60">{getEditableExcerpt(post, 105)}</p>
       </div>
     </Link>
   )
